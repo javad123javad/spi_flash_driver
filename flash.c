@@ -4,6 +4,7 @@
 #include<linux/kernel.h>
 #include <linux/cdev.h>
 #include <linux/fs.h>
+#include <linux/mutex.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Javad Rahimi");
@@ -17,17 +18,31 @@ MODULE_VERSION("0.01");
 static struct flash_cdev 
 {
 	struct cdev cdev;
-	dev_t dev;
+	dev_t dev_num;
 	struct class *class;
-        dev_t curr_dev;
+    	dev_t curr_dev;
+	unsigned int size;
 
+};
+struct winbod_w25
+{
+	unsigned int flash_size;
+	
 };
 
 struct flash_cdev flash;
+struct mutex dev_lock;
 /* File operations */
 int flash_open(struct inode *node, struct file *file)
 {
-
+	struct flash_cdev *pflash = NULL;
+	pflash = container_of(node->i_cdev, struct flash_cdev, cdev);
+	pr_info("Device Size: %d, Majpr: %u, Minor: %u\n",
+		pflash->size,	
+		imajor(node),
+		iminor(node));
+	pflash->size = 4096;
+	file->private_data = pflash;
 	return 0;
 }
 ssize_t flash_read(struct file *file, char __user *usr, size_t, loff_t *loff)
@@ -35,14 +50,25 @@ ssize_t flash_read(struct file *file, char __user *usr, size_t, loff_t *loff)
 	return 0;
 }
 
-ssize_t flash_write(struct file * file, const char __user *usr, size_t, loff_t *loff)
+ssize_t flash_write(struct file * file, const char __user *usr, size_t count, loff_t *pos)
 {
-
-	return 0;
+	char wbuf[256] = {0};
+	if(copy_from_user(wbuf, usr, count)!=0)
+	{
+		return -EFAULT;
+	}
+	pr_info("Data to write: %s\n", wbuf);
+	*pos += count;
+	return count;
 }
 
 int flash_release(struct inode *node, struct file *file)
 {
+	struct flash_cdev *pflash = NULL;
+        pflash = container_of(node->i_cdev, struct flash_cdev, cdev);
+	mutex_lock(&dev_lock);
+	file->private_data = NULL;
+	mutex_unlock(&dev_lock);
 	return 0;
 }
 const struct file_operations flash_ops = {
@@ -56,7 +82,7 @@ static int __init cflash_init(void)
 {
 	int ret = 0;
 	
-	ret = alloc_chrdev_region(&flash.dev, 0, FLASH_MINOR, FLASH_NAME);
+	ret = alloc_chrdev_region(&flash.dev_num, 0, FLASH_MINOR, FLASH_NAME);
 	
 	if(ret != 0)
 	{
@@ -65,7 +91,7 @@ static int __init cflash_init(void)
 
 	cdev_init(&flash.cdev, &flash_ops);
 	flash.cdev.owner = THIS_MODULE;
-	flash.curr_dev = MKDEV(MAJOR(flash.dev), MINOR(flash.dev));
+	flash.curr_dev = MKDEV(MAJOR(flash.dev_num), MINOR(flash.dev_num));
 	ret = cdev_add(&flash.cdev, flash.curr_dev, 1);
 	if(ret != 0)
 		goto cdev_err;
@@ -89,19 +115,19 @@ cdev_err:
 out_chrdev:
         pr_err("Unable to add char class");
 
-        unregister_chrdev_region(flash.dev, 1);
+        unregister_chrdev_region(flash.dev_num, 1);
 
 	return -2;
 
 }
 static void cflash_exit(void)
 {
-	pr_warn("remove the flash device");
-	device_destroy(flash.class, MKDEV(MAJOR(flash.dev), MINOR(flash.dev)));
-        cdev_del(&flash.cdev);
+	pr_info("remove the flash device");
+	device_destroy(flash.class, flash.curr_dev);
+    	cdev_del(&flash.cdev);
 	class_unregister(flash.class);
 	class_destroy(flash.class);
-	unregister_chrdev_region(flash.dev, 1);
+	unregister_chrdev_region(flash.dev_num, 1);
 }
 module_init(cflash_init);
 module_exit(cflash_exit);
