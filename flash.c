@@ -45,9 +45,16 @@ int flash_open(struct inode *node, struct file *file)
 	file->private_data = pflash;
 	return 0;
 }
-ssize_t flash_read(struct file *file, char __user *usr, size_t, loff_t *loff)
+ssize_t flash_read(struct file *file, char __user *usr, size_t, loff_t *pos)
 {
-	return 0;
+	const char *buf = "Test\r\n";
+	int count = 6;
+	int sent = copy_to_user(usr,buf, count);
+	if (sent)
+		return -EFAULT;
+	
+	*pos += count;
+	return count;
 }
 
 ssize_t flash_write(struct file * file, const char __user *usr, size_t count, loff_t *pos)
