@@ -1,0 +1,13 @@
+#ifndef _FLASH_IOCTL_H_
+#define _FLASH_IOCTL_H_
+
+#define FLASH_MAGIC 		'F'
+#define ERASE_FLASH_NO		0x01
+#define READ_FLASH_SEQ_NO	0x02
+
+
+#define ERASE_FLASH 	_IO(FLASH_MAGIC, ERASE_FLASH_NO)
+#define READ_FLASH_SEQ 	_IOR(FLASH_MAGIC, READ_FLASH_SEQ_NO, \
+		char *)
+
+#endif

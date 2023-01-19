@@ -5,6 +5,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/mutex.h>
+#include "flash_ioctl.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Javad Rahimi");
@@ -15,20 +16,25 @@ MODULE_VERSION("0.01");
 #define FLASH_MINOR 1
 #define FLASH_NAME	"norflash"
 #define FLASH_CLASS "flash-class"
+
 static struct flash_cdev 
 {
 	struct cdev cdev;
 	dev_t dev_num;
 	struct class *class;
-    	dev_t curr_dev;
+	dev_t curr_dev;
 	unsigned int size;
+	loff_t f_pos;
 
 };
+
+#if 0
 struct winbod_w25
 {
 	unsigned int flash_size;
-	
+
 };
+#endif
 
 struct flash_cdev flash;
 struct mutex dev_lock;
@@ -38,9 +44,9 @@ int flash_open(struct inode *node, struct file *file)
 	struct flash_cdev *pflash = NULL;
 	pflash = container_of(node->i_cdev, struct flash_cdev, cdev);
 	pr_info("Device Size: %d, Majpr: %u, Minor: %u\n",
-		pflash->size,	
-		imajor(node),
-		iminor(node));
+			pflash->size,
+			imajor(node),
+			iminor(node));
 	pflash->size = 4096;
 	file->private_data = pflash;
 	return 0;
@@ -52,7 +58,7 @@ ssize_t flash_read(struct file *file, char __user *usr, size_t, loff_t *pos)
 	int sent = copy_to_user(usr,buf, count);
 	if (sent)
 		return -EFAULT;
-	
+
 	*pos += count;
 	return count;
 }
@@ -72,25 +78,70 @@ ssize_t flash_write(struct file * file, const char __user *usr, size_t count, lo
 int flash_release(struct inode *node, struct file *file)
 {
 	struct flash_cdev *pflash = NULL;
-        pflash = container_of(node->i_cdev, struct flash_cdev, cdev);
+	pflash = container_of(node->i_cdev, struct flash_cdev, cdev);
 	mutex_lock(&dev_lock);
 	file->private_data = NULL;
 	mutex_unlock(&dev_lock);
 	return 0;
 }
+loff_t flash_seek(struct file *filp, loff_t offset, int whence)
+{
+	loff_t newpos = 0;
+
+	switch( whence ) {
+		case SEEK_SET:/* relative from the beginning of file */
+			newpos = offset; /* offset become the new position */
+			break;
+		case SEEK_CUR: /* relative to current file position */
+			/* just add offset to the current position */
+			// newpos = filep->f_pos + offset;
+			newpos = offset;
+			break;
+		case SEEK_END: /* relative to end of file */
+			newpos = 6 + offset;
+			break;
+		default:
+			return -EINVAL;
+	}
+
+	if ( newpos < 0 )
+		return -EINVAL;
+	/* Update f_pos with the new position */
+	// filp->f_pos = newpos;
+	/* Return the new file-pointer position */
+	return newpos;
+}
+
+static long flash_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	switch(cmd)
+	{
+		case ERASE_FLASH:
+			pr_info("Flash erase command.\n");
+			break;
+		default:
+			return -ENOTTY;
+
+	}
+
+	return 0;
+}
+
 const struct file_operations flash_ops = {
 	.owner = THIS_MODULE,
 	.open = flash_open,
 	.read = flash_read,
 	.write = flash_write,
-	.release = flash_release
+	.llseek = flash_seek,
+	.release = flash_release,
+	.unlocked_ioctl = flash_ioctl
 };
 static int __init cflash_init(void)
 {
 	int ret = 0;
-	
+
 	ret = alloc_chrdev_region(&flash.dev_num, 0, FLASH_MINOR, FLASH_NAME);
-	
+
 	if(ret != 0)
 	{
 		goto error;
@@ -120,9 +171,9 @@ cdev_err:
 	pr_err("Unable to add char device");
 	cdev_del(&flash.cdev);
 out_chrdev:
-        pr_err("Unable to add char class");
+	pr_err("Unable to add char class");
 
-        unregister_chrdev_region(flash.dev_num, 1);
+	unregister_chrdev_region(flash.dev_num, 1);
 
 	return -2;
 
@@ -131,7 +182,7 @@ static void cflash_exit(void)
 {
 	pr_info("remove the flash device");
 	device_destroy(flash.class, flash.curr_dev);
-    	cdev_del(&flash.cdev);
+	cdev_del(&flash.cdev);
 	class_unregister(flash.class);
 	class_destroy(flash.class);
 	unregister_chrdev_region(flash.dev_num, 1);
